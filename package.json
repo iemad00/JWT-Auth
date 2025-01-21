@@ -1,26 +1,27 @@
 {
-    "name": "jwt-auth",
-    "version": "1.0.0",
-    "description": "",
-    "main": "index.js",
-    "scripts": {
-        "build": "rimraf dist && npx tsc",
-        "prestart": "npm run build",
-        "start": "node dist/app.js",
-        "preserve": "npm run build",
-        "serve": "concurrently \"npx tsc -w\" \"nodemon dist/app.js\""
-    },
-    "keywords": [],
-    "author": "",
-    "license": "ISC",
-    "dependencies": {
-        "@types/express": "^5.0.0",
-        "@types/node": "^22.10.7",
-        "express": "^4.21.2",
-        "rimraf": "^6.0.1",
-        "typescript": "^5.7.3"
-    },
-    "devDependencies": {
-        "@biomejs/biome": "1.9.4"
-    }
+	"name": "jwt-auth",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"build": "rimraf dist && npx tsc",
+		"prestart": "npm run build",
+		"start": "node dist/server.js",
+		"preserve": "npm run build",
+		"serve": "concurrently \"npx tsc -w\" \"nodemon dist/server.js\""
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"dependencies": {
+		"@types/express": "^5.0.0",
+		"@types/node": "^22.10.7",
+		"fastify": "^4.29.0",
+		"rimraf": "^6.0.1",
+		"typescript": "^5.7.3"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "1.9.4",
+		"concurrently": "^9.1.2"
+	}
 }

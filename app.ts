@@ -1,12 +1,9 @@
-import express from "express";
-const app = express();
+import Fastify from "fastify";
+import authRoutes from "./routes/authRoutes";
 
-const port = 8000;
+const app = Fastify();
 
-app.get("/", (req, res) => {
-	res.send("Hello");
-});
+// Register Routes
+app.register(authRoutes, { prefix: "/auth" });
 
-app.listen(port, () => {
-	console.log(`App is listening to port ${port}`);
-});
+export default app;
