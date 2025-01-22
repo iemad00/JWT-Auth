@@ -1,57 +1,44 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { validateRequest } from "../utils/validation";
 import {
-	createUser,
 	findUserByPhone,
+	createUser,
 	savePasscode,
 	findPasscodeByUserId,
 } from "../models/userModel";
+import { sendOtpToPhone, validateOtp } from "../services/otpService";
 import {
-	saveToRedis,
-	getFromRedis,
-	deleteFromRedis,
-} from "../utils/redisClient";
-import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
-import * as smsService from "../services/smsService";
-import otpHelper from "../helpers/otpHelper";
-import { validateRequest } from "../utils/validation";
-import { SendOtpType } from "../types/sendOtp.type";
-import { VerifyOtpType } from "../types/verifyOtp.type";
-import { LoginType } from "../types/login.type";
-import { RefreshTokenType } from "../types/refreshToken.type";
+	createJwtToken,
+	verifyJwtToken,
+	hashPasscode,
+	comparePasscodes,
+	ACCESS_TOKEN_EXPIRY,
+	REFRESH_TOKEN_EXPIRY,
+	LOGIN_TOKEN_EXPIRY,
+} from "../utils/authUtils";
 import {
 	Ok,
 	BadRequest,
 	Unauthorized,
 	InternalServerError,
 } from "../utils/responseHelper";
+import { SendOtpType } from "../types/sendOtp.type";
+import { VerifyOtpType } from "../types/verifyOtp.type";
+import { LoginType } from "../types/login.type";
+import { RefreshTokenType } from "../types/refreshToken.type";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
-const LOGIN_TOKEN_EXPIRY = "5m";
-const ACCESS_TOKEN_EXPIRY = "10m";
-const REFRESH_TOKEN_EXPIRY = "1d";
-
-// Send OTP
 export const sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
 	validateRequest(request.query, SendOtpType);
 
 	try {
 		const { phone } = request.query as { phone: string };
-
-		// Generate and save OTP
-		const otp = otpHelper.generateOtp();
-		await saveToRedis(`otp:${phone}`, otp, 90);
-
-		// Send OTP via SMS
-		smsService.sendOTP(phone, otp);
-
+		await sendOtpToPhone(phone);
 		Ok(reply, "OTP sent successfully");
-	} catch (error) {
+	} catch {
 		InternalServerError(reply, "Failed to send OTP");
 	}
 };
 
-// Verify OTP
 export const verifyOtp = async (
 	request: FastifyRequest,
 	reply: FastifyReply,
@@ -65,14 +52,10 @@ export const verifyOtp = async (
 			name?: string;
 		};
 
-		// Validate OTP
-		const storedOtp = await getFromRedis(`otp:${phone}`);
-		if (!storedOtp || storedOtp !== otp) {
+		if (!(await validateOtp(phone, otp))) {
 			return BadRequest(reply, "Invalid or expired OTP");
 		}
-		await deleteFromRedis(`otp:${phone}`);
 
-		// Get or create user
 		let user = await findUserByPhone(phone);
 		if (!user) {
 			user = await createUser(phone, name || "Unknown User");
@@ -81,18 +64,16 @@ export const verifyOtp = async (
 		const passcode = await findPasscodeByUserId(user.id);
 		const firstLogin = !passcode;
 
-		// Generate a login token
-		const loginToken = jwt.sign({ userId: user.id, firstLogin }, JWT_SECRET, {
-			expiresIn: LOGIN_TOKEN_EXPIRY,
-		});
-
+		const loginToken = createJwtToken(
+			{ userId: user.id, firstLogin },
+			LOGIN_TOKEN_EXPIRY,
+		);
 		Ok(reply, "OTP verified", { loginToken, firstLogin });
-	} catch (error) {
+	} catch {
 		InternalServerError(reply, "Failed to verify OTP");
 	}
 };
 
-// Login
 export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 	validateRequest(request.body, LoginType);
 
@@ -102,44 +83,30 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 			passcode: string;
 		};
 
-		// Verify login token
-		const decoded = jwt.verify(loginToken, JWT_SECRET) as {
-			userId: number;
-			firstLogin: boolean;
-		};
-
-		const { userId, firstLogin } = decoded;
+		const { userId, firstLogin } = verifyJwtToken(loginToken);
 
 		if (firstLogin) {
-			const hashedPasscode = await bcrypt.hash(passcode, 10);
+			const hashedPasscode = await hashPasscode(passcode);
 			await savePasscode(userId, hashedPasscode);
 		} else {
 			const userPasscode = await findPasscodeByUserId(userId);
-			const isMatch = await bcrypt.compare(
-				passcode,
-				userPasscode?.hashedPasscode || "",
-			);
-
-			if (!isMatch) {
+			if (
+				!userPasscode ||
+				!(await comparePasscodes(passcode, userPasscode.hashedPasscode))
+			) {
 				return Unauthorized(reply);
 			}
 		}
 
-		// Generate JWT tokens
-		const accessToken = jwt.sign({ userId }, JWT_SECRET, {
-			expiresIn: ACCESS_TOKEN_EXPIRY,
-		});
-		const refreshToken = jwt.sign({ userId }, JWT_SECRET, {
-			expiresIn: REFRESH_TOKEN_EXPIRY,
-		});
+		const accessToken = createJwtToken({ userId }, ACCESS_TOKEN_EXPIRY);
+		const refreshToken = createJwtToken({ userId }, REFRESH_TOKEN_EXPIRY);
 
 		Ok(reply, "Login successful", { accessToken, refreshToken });
-	} catch (error) {
+	} catch {
 		Unauthorized(reply);
 	}
 };
 
-// Refresh Token
 export const refreshToken = async (
 	request: FastifyRequest,
 	reply: FastifyReply,
@@ -152,36 +119,19 @@ export const refreshToken = async (
 			passcode: string;
 		};
 
-		// Verify the refresh token
-		const decoded = jwt.verify(refreshToken, JWT_SECRET) as { userId: number };
+		const { userId } = verifyJwtToken(refreshToken);
 
-		const { userId } = decoded;
-
-		// Fetch the user's stored passcode
 		const userPasscode = await findPasscodeByUserId(userId);
-		if (!userPasscode) {
+		if (
+			!userPasscode ||
+			!(await comparePasscodes(passcode, userPasscode.hashedPasscode))
+		) {
 			return Unauthorized(reply);
 		}
 
-		const isPasscodeValid = await bcrypt.compare(
-			passcode,
-			userPasscode.hashedPasscode,
-		);
-		if (!isPasscodeValid) {
-			return Unauthorized(reply);
-		}
-
-		// Generate a new access token
-		const accessToken = jwt.sign({ userId }, JWT_SECRET, {
-			expiresIn: ACCESS_TOKEN_EXPIRY,
-		});
-
+		const accessToken = createJwtToken({ userId }, ACCESS_TOKEN_EXPIRY);
 		Ok(reply, "Token refreshed successfully", { accessToken });
-	} catch (error) {
-		if (error instanceof jwt.JsonWebTokenError) {
-			Unauthorized(reply);
-		} else {
-			Unauthorized(reply);
-		}
+	} catch {
+		Unauthorized(reply);
 	}
 };
