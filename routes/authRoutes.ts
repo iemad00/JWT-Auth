@@ -1,8 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { register, login, getProfile } from "../controllers/authController";
+import { sendOtp, verifyOtp } from "../controllers/authController";
 
 export default async function authRoutes(app: FastifyInstance) {
-	app.post("/register", register);
-	app.post("/login", login);
-	app.get("/profile", getProfile);
+  app.get("/send", sendOtp);
+  app.post("/verify", verifyOtp);
 }

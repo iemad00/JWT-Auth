@@ -1,39 +1,44 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { createUser, findUserByEmail } from "../models/userModel";
+import otpHelper from "../helpers/otpHelper";
+import * as smsService from "../services/smsService";
 
-interface RegisterRequestBody {
-	email: string;
-	password: string;
-}
+//TODO: Store OTPs in Radis
+const otpStore: Record<string, string> = {};
 
-export const register = async (
-	request: FastifyRequest<{ Body: RegisterRequestBody }>,
-	reply: FastifyReply,
+export const sendOtp = async (
+  request: FastifyRequest<{ Querystring: { phone: string } }>,
+  reply: FastifyReply
 ) => {
-	const email: string = request.body.email;
-	const password: string = request.body.password;
-	createUser(email, password);
-	reply.send({ message: "Register endpoint" });
+  const { phone } = request.query;
+
+  if (!phone) {
+    return reply.status(400).send({ error: "Phone number is required" });
+  }
+
+  // Generate OTP and store it
+  const otp = otpHelper.generateOtp();
+  otpStore[phone] = otp;
+
+  // Send OTP
+  smsService.sendOTP(phone, otp);
+  reply.send({ message: "OTP sent successfully (logged for now)" });
 };
 
-export const login = async (request: FastifyRequest, reply: FastifyReply) => {
-	reply.send({ message: "Login endpoint" });
-};
-
-interface ProfileRequestBody {
-	email: string;
-}
-
-interface ProfileRequestQuery {
-	email: string;
-}
-
-export const getProfile = async (
-	request: FastifyRequest<{ Querystring: ProfileRequestQuery }>,
-	reply: FastifyReply,
+export const verifyOtp = async (
+  request: FastifyRequest<{ Body: { phone: string; otp: string } }>,
+  reply: FastifyReply
 ) => {
-	const email: string = request.query.email;
-	const user = await findUserByEmail(email);
+  const { phone, otp } = request.body;
 
-	reply.send({ message: "Success", user });
+  if (!phone || !otp) {
+    return reply.status(400).send({ error: "Phone and OTP are required" });
+  }
+
+  // Validate OTP
+  if (otpStore[phone] && otpStore[phone] === otp) {
+    delete otpStore[phone]; // Remove OTP after successful verification
+    return reply.send({ message: "OTP verified successfully" });
+  }
+
+  reply.status(400).send({ error: "Invalid OTP" });
 };
