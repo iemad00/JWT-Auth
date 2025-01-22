@@ -9,6 +9,7 @@ import {
 export const users = mysqlTable("users", {
 	id: serial("id").primaryKey(),
 	name: varchar("name", { length: 255 }),
+	email: varchar("email", { length: 255 }),
 	phone: varchar("phone", { length: 20 }).notNull(),
 	createdAt: timestamp("created_at").defaultNow(),
 });

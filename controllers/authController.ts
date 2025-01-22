@@ -78,10 +78,11 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 	validateRequest(request.body, LoginType);
 
 	try {
-		const { loginToken, passcode, name } = request.body as {
+		const { loginToken, passcode, name, email } = request.body as {
 			loginToken: string;
 			passcode: string;
 			name?: string;
+			email?: string;
 		};
 
 		const { userId, firstLogin } = verifyJwtToken(loginToken);
@@ -90,8 +91,8 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 			const hashedPasscode = await hashPasscode(passcode);
 			await savePasscode(userId, hashedPasscode);
 
-			if (name) {
-				updateUser(userId, { name });
+			if (name || email) {
+				updateUser(userId, { name, email });
 			}
 		} else {
 			const userPasscode = await findPasscodeByUserId(userId);
