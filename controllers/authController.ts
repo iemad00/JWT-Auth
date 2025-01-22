@@ -18,6 +18,7 @@ import { validateRequest } from "../utils/validation";
 import { SendOtpType } from "../types/sendOtp.type";
 import { VerifyOtpType } from "../types/verifyOtp.type";
 import { LoginType } from "../types/login.type";
+import { RefreshTokenType } from "../types/refreshToken.type";
 import {
 	Ok,
 	BadRequest,
@@ -26,9 +27,9 @@ import {
 } from "../utils/responseHelper";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
-const LOGIN_TOKEN_EXPIRY = "10m";
-const ACCESS_TOKEN_EXPIRY = "1h";
-const REFRESH_TOKEN_EXPIRY = "7d";
+const LOGIN_TOKEN_EXPIRY = "5m";
+const ACCESS_TOKEN_EXPIRY = "10m";
+const REFRESH_TOKEN_EXPIRY = "1d";
 
 // Send OTP
 export const sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -98,7 +99,7 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 	try {
 		const { loginToken, passcode } = request.body as {
 			loginToken: string;
-			passcode?: string;
+			passcode: string;
 		};
 
 		// Verify login token
@@ -110,16 +111,9 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 		const { userId, firstLogin } = decoded;
 
 		if (firstLogin) {
-			if (!passcode) {
-				return BadRequest(reply, "Passcode is required for first login");
-			}
 			const hashedPasscode = await bcrypt.hash(passcode, 10);
 			await savePasscode(userId, hashedPasscode);
 		} else {
-			if (!passcode) {
-				return BadRequest(reply, "Passcode is required");
-			}
-
 			const userPasscode = await findPasscodeByUserId(userId);
 			const isMatch = await bcrypt.compare(
 				passcode,
@@ -142,5 +136,52 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 		Ok(reply, "Login successful", { accessToken, refreshToken });
 	} catch (error) {
 		Unauthorized(reply);
+	}
+};
+
+// Refresh Token
+export const refreshToken = async (
+	request: FastifyRequest,
+	reply: FastifyReply,
+) => {
+	validateRequest(request.body, RefreshTokenType);
+
+	try {
+		const { refreshToken, passcode } = request.body as {
+			refreshToken: string;
+			passcode: string;
+		};
+
+		// Verify the refresh token
+		const decoded = jwt.verify(refreshToken, JWT_SECRET) as { userId: number };
+
+		const { userId } = decoded;
+
+		// Fetch the user's stored passcode
+		const userPasscode = await findPasscodeByUserId(userId);
+		if (!userPasscode) {
+			return Unauthorized(reply);
+		}
+
+		const isPasscodeValid = await bcrypt.compare(
+			passcode,
+			userPasscode.hashedPasscode,
+		);
+		if (!isPasscodeValid) {
+			return Unauthorized(reply);
+		}
+
+		// Generate a new access token
+		const accessToken = jwt.sign({ userId }, JWT_SECRET, {
+			expiresIn: ACCESS_TOKEN_EXPIRY,
+		});
+
+		Ok(reply, "Token refreshed successfully", { accessToken });
+	} catch (error) {
+		if (error instanceof jwt.JsonWebTokenError) {
+			Unauthorized(reply);
+		} else {
+			Unauthorized(reply);
+		}
 	}
 };
