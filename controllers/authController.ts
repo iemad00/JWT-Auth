@@ -3,6 +3,7 @@ import { validateRequest } from "../utils/validation";
 import {
 	findUserByPhone,
 	createUser,
+	updateUser,
 	savePasscode,
 	findPasscodeByUserId,
 } from "../models/userModel";
@@ -46,10 +47,9 @@ export const verifyOtp = async (
 	validateRequest(request.body, VerifyOtpType);
 
 	try {
-		const { phone, otp, name } = request.body as {
+		const { phone, otp } = request.body as {
 			phone: string;
 			otp: string;
-			name?: string;
 		};
 
 		if (!(await validateOtp(phone, otp))) {
@@ -58,7 +58,7 @@ export const verifyOtp = async (
 
 		let user = await findUserByPhone(phone);
 		if (!user) {
-			user = await createUser(phone, name || "Unknown User");
+			user = await createUser(phone);
 		}
 
 		const passcode = await findPasscodeByUserId(user.id);
@@ -78,9 +78,10 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 	validateRequest(request.body, LoginType);
 
 	try {
-		const { loginToken, passcode } = request.body as {
+		const { loginToken, passcode, name } = request.body as {
 			loginToken: string;
 			passcode: string;
+			name?: string;
 		};
 
 		const { userId, firstLogin } = verifyJwtToken(loginToken);
@@ -88,6 +89,10 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 		if (firstLogin) {
 			const hashedPasscode = await hashPasscode(passcode);
 			await savePasscode(userId, hashedPasscode);
+
+			if (name) {
+				updateUser(userId, { name });
+			}
 		} else {
 			const userPasscode = await findPasscodeByUserId(userId);
 			if (
