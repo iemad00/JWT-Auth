@@ -6,6 +6,10 @@ export const findUserByPhone = async (phone: string) => {
 	return (await db.select().from(users).where(eq(users.phone, phone)))[0];
 };
 
+export const findUserById = async (id: number) => {
+	return (await db.select().from(users).where(eq(users.id, id)))[0];
+};
+
 export const createUser = async (phone: string, name: string | undefined) => {
 	const uid = await db
 		.insert(users)

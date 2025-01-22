@@ -1,8 +1,13 @@
 import Fastify from "fastify";
 import authRoutes from "./routes/authRoutes";
 import { db } from "./db/connection";
+import { errorHandler } from "./middlewares/errorHandler";
+import profileRoutes from "./routes/profileRoute";
 
 const app = Fastify();
+
+// Register Error Handler
+app.setErrorHandler(errorHandler);
 
 (async () => {
 	try {
@@ -16,5 +21,6 @@ const app = Fastify();
 
 // Register Routes
 app.register(authRoutes, { prefix: "/auth" });
+app.register(profileRoutes, { prefix: "/profile" });
 
 export default app;
