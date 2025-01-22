@@ -16,27 +16,14 @@ import * as smsService from "../services/smsService";
 import otpHelper from "../helpers/otpHelper";
 import { Type } from "@sinclair/typebox";
 import { validateRequest } from "../utils/validation";
+import { SendOtpType } from "../types/sendOtp.type";
+import { VerifyOtpType } from "../types/verifyOtp.type";
+import { LoginType } from "../types/login.type";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
 const LOGIN_TOKEN_EXPIRY = "10m";
 const ACCESS_TOKEN_EXPIRY = "1h";
 const REFRESH_TOKEN_EXPIRY = "7d";
-
-// Types Definitions for Validation
-const SendOtpType = Type.Object({
-	phone: Type.String({ minLength: 10, maxLength: 15 }),
-});
-
-const VerifyOtpType = Type.Object({
-	phone: Type.String({ minLength: 10, maxLength: 15 }),
-	otp: Type.String({ minLength: 4, maxLength: 4 }),
-	name: Type.Optional(Type.String({ maxLength: 255 })),
-});
-
-const LoginType = Type.Object({
-	loginToken: Type.String(),
-	passcode: Type.Optional(Type.String({ minLength: 4, maxLength: 10 })),
-});
 
 // Send OTP
 export const sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
