@@ -14,11 +14,16 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import * as smsService from "../services/smsService";
 import otpHelper from "../helpers/otpHelper";
-import { Type } from "@sinclair/typebox";
 import { validateRequest } from "../utils/validation";
 import { SendOtpType } from "../types/sendOtp.type";
 import { VerifyOtpType } from "../types/verifyOtp.type";
 import { LoginType } from "../types/login.type";
+import {
+	Ok,
+	BadRequest,
+	Unauthorized,
+	InternalServerError,
+} from "../utils/responseHelper";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
 const LOGIN_TOKEN_EXPIRY = "10m";
@@ -29,16 +34,20 @@ const REFRESH_TOKEN_EXPIRY = "7d";
 export const sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
 	validateRequest(request.query, SendOtpType);
 
-	const { phone } = request.query as { phone: string };
+	try {
+		const { phone } = request.query as { phone: string };
 
-	// Generate and save OTP
-	const otp = otpHelper.generateOtp();
-	await saveToRedis(`otp:${phone}`, otp, 90);
+		// Generate and save OTP
+		const otp = otpHelper.generateOtp();
+		await saveToRedis(`otp:${phone}`, otp, 90);
 
-	// Send OTP via SMS
-	smsService.sendOTP(phone, otp);
+		// Send OTP via SMS
+		smsService.sendOTP(phone, otp);
 
-	reply.send({ success: true, message: "OTP sent successfully." });
+		Ok(reply, "OTP sent successfully");
+	} catch (error) {
+		InternalServerError(reply, "Failed to send OTP");
+	}
 };
 
 // Verify OTP
@@ -48,53 +57,50 @@ export const verifyOtp = async (
 ) => {
 	validateRequest(request.body, VerifyOtpType);
 
-	const { phone, otp, name } = request.body as {
-		phone: string;
-		otp: string;
-		name?: string;
-	};
+	try {
+		const { phone, otp, name } = request.body as {
+			phone: string;
+			otp: string;
+			name?: string;
+		};
 
-	// Validate OTP
-	const storedOtp = await getFromRedis(`otp:${phone}`);
-	if (!storedOtp || storedOtp !== otp) {
-		return reply
-			.status(400)
-			.send({ success: false, message: "Invalid or expired OTP." });
+		// Validate OTP
+		const storedOtp = await getFromRedis(`otp:${phone}`);
+		if (!storedOtp || storedOtp !== otp) {
+			return BadRequest(reply, "Invalid or expired OTP");
+		}
+		await deleteFromRedis(`otp:${phone}`);
+
+		// Get or create user
+		let user = await findUserByPhone(phone);
+		if (!user) {
+			user = await createUser(phone, name || "Unknown User");
+		}
+
+		const passcode = await findPasscodeByUserId(user.id);
+		const firstLogin = !passcode;
+
+		// Generate a login token
+		const loginToken = jwt.sign({ userId: user.id, firstLogin }, JWT_SECRET, {
+			expiresIn: LOGIN_TOKEN_EXPIRY,
+		});
+
+		Ok(reply, "OTP verified", { loginToken, firstLogin });
+	} catch (error) {
+		InternalServerError(reply, "Failed to verify OTP");
 	}
-	await deleteFromRedis(`otp:${phone}`);
-
-	// Get or create user
-	let user = await findUserByPhone(phone);
-	if (!user) {
-		user = await createUser(phone, name || "Unknown User");
-	}
-
-	const passcode = await findPasscodeByUserId(user.id);
-	const firstLogin = !passcode;
-
-	// Generate a login token
-	const loginToken = jwt.sign({ userId: user.id, firstLogin }, JWT_SECRET, {
-		expiresIn: LOGIN_TOKEN_EXPIRY,
-	});
-
-	reply.send({
-		success: true,
-		message: "OTP verified.",
-		loginToken,
-		firstLogin,
-	});
 };
 
 // Login
 export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 	validateRequest(request.body, LoginType);
 
-	const { loginToken, passcode } = request.body as {
-		loginToken: string;
-		passcode?: string;
-	};
-
 	try {
+		const { loginToken, passcode } = request.body as {
+			loginToken: string;
+			passcode?: string;
+		};
+
 		// Verify login token
 		const decoded = jwt.verify(loginToken, JWT_SECRET) as {
 			userId: number;
@@ -105,15 +111,13 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 
 		if (firstLogin) {
 			if (!passcode) {
-				return reply
-					.status(400)
-					.send({ message: "Passcode is required for first login." });
+				return BadRequest(reply, "Passcode is required for first login");
 			}
 			const hashedPasscode = await bcrypt.hash(passcode, 10);
 			await savePasscode(userId, hashedPasscode);
 		} else {
 			if (!passcode) {
-				return reply.status(400).send({ message: "Passcode is required." });
+				return BadRequest(reply, "Passcode is required");
 			}
 
 			const userPasscode = await findPasscodeByUserId(userId);
@@ -123,7 +127,7 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 			);
 
 			if (!isMatch) {
-				return reply.status(400).send({ message: "Invalid passcode." });
+				return Unauthorized(reply);
 			}
 		}
 
@@ -135,15 +139,8 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
 			expiresIn: REFRESH_TOKEN_EXPIRY,
 		});
 
-		reply.send({
-			success: true,
-			message: "Login successful.",
-			accessToken,
-			refreshToken,
-		});
+		Ok(reply, "Login successful", { accessToken, refreshToken });
 	} catch (error) {
-		reply
-			.status(401)
-			.send({ success: false, message: "Invalid or expired login token." });
+		Unauthorized(reply);
 	}
 };

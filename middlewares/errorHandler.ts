@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ValidationError } from "../utils/validation";
+import { BadRequest, InternalServerError } from "../utils/responseHelper";
 
 export const errorHandler = (
 	error: Error,
@@ -7,15 +8,8 @@ export const errorHandler = (
 	reply: FastifyReply,
 ) => {
 	if (error instanceof ValidationError) {
-		reply.status(400).send({
-			success: false,
-			message: "Validation failed",
-			errors: error.errors,
-		});
+		BadRequest(reply, "Validation failed", error.errors);
 	} else {
-		reply.status(500).send({
-			success: false,
-			message: "Internal Server Error",
-		});
+		InternalServerError(reply, "Internal Server Error");
 	}
 };
